@@ -3,8 +3,9 @@ DiracNets
 
 Code and models for DiracNets: Training Very Deep Neural Networks Without Skip-Connections.
 
-Networks with skip-connections like ResNet show excellent performance in image recognition benchmarks, but do not benefit from increased depth, we are thus still interested in learning __actually__ deep representations, and the benefits they could bring. We propose a simple weight parameterization, which improves training of deep plain (without skip-connections) networks, and allows training plain networks with hundreds of layers. Accuracy of our proposed DiracNets is close to Wide ResNet (although needs more parameters to achieve it), and we are able to outperform ResNet-1000 with plain DiracNet with only 34 layers. Also, the proposed Dirac weight parameterization can be folded into one filter for inference, leading to easily interpretable VGG-like network.
+Networks with skip-connections like ResNet show excellent performance in image recognition benchmarks, but do not benefit from increased depth, we are thus still interested in learning __actually__ deep representations, and the benefits they could bring. We propose a simple weight parameterization, which improves training of deep plain (without skip-connections) networks, and allows training plain networks with hundreds of layers. Accuracy of our proposed DiracNets is close to Wide ResNet (although DiracNets need more parameters to achieve it), and we are able to outperform ResNet-1000 with plain DiracNet with only 34 layers. Also, the proposed Dirac weight parameterization can be folded into one filter for inference, leading to easily interpretable VGG-like network.
 
+<img src=http://imagine.enpc.fr/~zagoruys/depths.svg>
 
 ## TL;DR
 
@@ -14,12 +15,12 @@ In a nutshell, Dirac parameterization is simply a sum of filters and Dirac delta
 conv2d(x, delta + W)
 ```
 
-To plug it into a plain network, we add several learnable scalar parameters and weight normalization.
+To plug it into a plain network, we add learnable scalar parameters `alpha`, `beta` and weight normalization.
 Here is simplified PyTorch-like pseudocode for the function:
 
 ```python
 def dirac_conv2d(input, W, alpha, beta)
-    return F.conv2d(input, alpha * dirac(W.data) + beta * F.normalize(W))
+    return F.conv2d(input, alpha * dirac(W) + beta * F.normalize(W))
 ```
 
 We also use NCReLU (negative CReLU) nonlinearity:
