@@ -10,7 +10,7 @@ Networks with skip-connections like ResNet show excellent performance in image r
 
 In a nutshell, Dirac parameterization is simply a sum of filters and Dirac delta function:
 
-```
+```python
 conv2d(x, delta + W)
 ```
 
@@ -34,10 +34,12 @@ def ncrelu(x):
 
 Code structure:
 
+```
 ├── README.md       # this file
 ├── diracconv.py    # DiracConv definitions
 ├── test.py         # unit tests
 └── train.py        # CIFAR and ImageNet training code
+```
 
 ### nn.Module code
 
