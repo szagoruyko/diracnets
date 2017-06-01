@@ -5,7 +5,7 @@ Code and models for DiracNets: Training Very Deep Neural Networks Without Skip-C
 
 Networks with skip-connections like ResNet show excellent performance in image recognition benchmarks, but do not benefit from increased depth, we are thus still interested in learning __actually__ deep representations, and the benefits they could bring. We propose a simple weight parameterization, which improves training of deep plain (without skip-connections) networks, and allows training plain networks with hundreds of layers. Accuracy of our proposed DiracNets is close to Wide ResNet (although DiracNets need more parameters to achieve it), and we are able to outperform ResNet-1000 with plain DiracNet with only 34 layers. Also, the proposed Dirac weight parameterization can be folded into one filter for inference, leading to easily interpretable VGG-like network.
 
-<img src=http://imagine.enpc.fr/~zagoruys/depths.svg>
+<img src=http://imagine.enpc.fr/~zagoruys/delta-circles.svg>
 
 ## TL;DR
 
