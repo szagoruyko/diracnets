@@ -39,7 +39,7 @@ Code structure:
 ├── [README.md](README.md)          # this file<br>
 ├── [diracconv.py](diracconv.py)    # modular DiracConv definitions<br>
 ├── [test.py](test.py)              # unit tests<br>
-├── [diracnets.ipynb](diracnets.ipynb) # ImageNet pretrained models<br>
+├── [diracnet-export.ipynb](diracnet-export.ipynb) # ImageNet pretrained models<br>
 └── [train.py](train.py)            # CIFAR and ImageNet training code<br>
 
 ### Requirements
