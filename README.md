@@ -32,6 +32,13 @@ def ncrelu(x):
 
 ## Code
 
+Code structure:
+
+├── README.md       # this file
+├── diracconv.py    # DiracConv definitions
+├── test.py         # unit tests
+└── train.py        # CIFAR and ImageNet training code
+
 ### nn.Module code
 
 We provide `DiracConv1d`, `DiracConv2d`, `DiracConv3d`, which work like `nn.Conv1d`, `nn.Conv2d`, `nn.Conv3d`, but have Dirac-parametrization inside.
@@ -41,3 +48,58 @@ Training code doesn't use these modules, and uses only functional interface to P
 ## Pretrained models
 
 We fold batch normalization and Dirac parameterization into `F.conv2d` `weight` and `bias` tensors for simplicity. Resulting models are as simple as VGG or AlexNet, having only nonlinearity+conv2d as a basic block.
+
+See [diracnets.ipynb](diracnets.ipynb) for functional and modular model definitions.
+
+We provide printout of DiracNet-18-0.75 sequential model for reference:
+
+```
+Sequential (
+  (conv): Conv2d(3, 48, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+  (max_pool0): MaxPool2d (size=(3, 3), stride=(2, 2), padding=(1, 1), dilation=(1, 1))
+  (group0.block0.bn): Affine(48)
+  (group0.block0.ncrelu): NCReLU()
+  (group0.block0.conv): Conv2d(96, 48, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (group0.block1.ncrelu): NCReLU()
+  (group0.block1.conv): Conv2d(96, 48, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (group0.block2.ncrelu): NCReLU()
+  (group0.block2.conv): Conv2d(96, 48, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (group0.block3.ncrelu): NCReLU()
+  (group0.block3.conv): Conv2d(96, 48, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+  (max_pool1): MaxPool2d (size=(2, 2), stride=(2, 2), dilation=(1, 1))
+  (group1.block0.bn): Affine(48)
+  (group1.block0.ncrelu): NCReLU()
+  (group1.block0.conv): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (group1.block1.ncrelu): NCReLU()
+  (group1.block1.conv): Conv2d(192, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (group1.block2.ncrelu): NCReLU()
+  (group1.block2.conv): Conv2d(192, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (group1.block3.ncrelu): NCReLU()
+  (group1.block3.conv): Conv2d(192, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+  (max_pool2): MaxPool2d (size=(2, 2), stride=(2, 2), dilation=(1, 1))
+  (group2.block0.bn): Affine(96)
+  (group2.block0.ncrelu): NCReLU()
+  (group2.block0.conv): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (group2.block1.ncrelu): NCReLU()
+  (group2.block1.conv): Conv2d(384, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (group2.block2.ncrelu): NCReLU()
+  (group2.block2.conv): Conv2d(384, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (group2.block3.ncrelu): NCReLU()
+  (group2.block3.conv): Conv2d(384, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+  (max_pool3): MaxPool2d (size=(2, 2), stride=(2, 2), dilation=(1, 1))
+  (group3.block0.bn): Affine(192)
+  (group3.block0.ncrelu): NCReLU()
+  (group3.block0.conv): Conv2d(384, 384, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (group3.block1.ncrelu): NCReLU()
+  (group3.block1.conv): Conv2d(768, 384, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (group3.block2.ncrelu): NCReLU()
+  (group3.block2.conv): Conv2d(768, 384, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (group3.block3.ncrelu): NCReLU()
+  (group3.block3.conv): Conv2d(768, 384, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (relu): ReLU ()
+  (avg_pool): AvgPool2d (
+  )
+  (view): Flatten()
+  (fc): Linear (384 -> 1000)
+)
+```
