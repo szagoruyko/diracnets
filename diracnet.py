@@ -27,8 +27,8 @@ def cast(params, dtype='float'):
         return getattr(params.cuda() if torch.cuda.is_available() else params, dtype)()
 
 
-def conv_params(ni, no, k=1, gain=2.0):
-    return torch.Tensor(no, ni * 2, k, k).normal_(std=gain)
+def conv_params(ni, no, k=1, gain=1.0):
+    return cast(torch.Tensor(no, ni * 2, k, k).normal_(std=gain))
 
 
 def linear_params(ni, no):
@@ -106,7 +106,7 @@ def group(o, params, stats, base, mode, count):
 def define_diracnet(depth, width, dataset):
 
     def gen_group_params(ni, no, count):
-        return {'block%d' % i: {'conv': conv_params(ni if i == 0 else no, no, k=3, gain=1), 'bn': bnparams(no)}
+        return {'block%d' % i: {'conv': conv_params(ni if i == 0 else no, no, k=3, gain=0.1), 'bn': bnparams(no)}
                 for i in range(count)}
 
     def gen_group_stats(no, count):

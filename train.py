@@ -231,7 +231,7 @@ def main():
             "test_time": timer_test.value(),
         }, state)
         print '==> id: %s (%d/%d), test_acc: \33[91m%.2f\033[0m' % \
-                (opt.save, state['epoch'], opt.epochs, test_acc)
+                (opt.save, state['epoch'], opt.epochs, test_acc[0])
 
     engine = Engine()
     engine.hooks['on_sample'] = on_sample
