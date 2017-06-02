@@ -92,22 +92,21 @@ def create_iterator(opt, mode):
 
         convert = tnt.transform.compose([
             lambda x: x.astype(np.float32) / 255.0,
-            T.Normalize(mean=[0.485, 0.456, 0.406],
-                                   std=[0.229, 0.224, 0.225]),
+            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             lambda x: x.transpose(2, 0, 1).astype(np.float32),
             torch.from_numpy,
         ])
 
         print("| setting up data loader...")
         if mode:
-            traindir = os.path.join(opt.imagenetpath, 'train')
+            traindir = os.path.join(opt.dataroot, 'train')
             ds = datasets.ImageFolder(traindir, tnt.transform.compose([
                 T.RandomSizedCrop(224),
                 T.RandomHorizontalFlip(),
                 convert,
             ]), loader=cvload)
         else:
-            valdir = os.path.join(opt.imagenetpath, 'val')
+            valdir = os.path.join(opt.dataroot, 'val')
             ds = datasets.ImageFolder(valdir, tnt.transform.compose([
                 T.Scale(256),
                 T.CenterCrop(224),
