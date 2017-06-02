@@ -141,6 +141,6 @@ We plan to add more pretrained models later.
 @inproceedings{Zagoruyko2017diracnets,
     author = {Sergey Zagoruyko and Nikos Komodakis},
     title = {DiracNets: Training Very Deep Neural Networks Without Skip-Connections},
-    url = {https://arxiv.org/abs/1612.03928},
+    url = {https://arxiv.org/abs/1706.00388},
     year = {2017}}
 ```
