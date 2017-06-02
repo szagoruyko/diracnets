@@ -1,10 +1,10 @@
 """
     PyTorch training code for DiracNets
 
-    The code reproduces *exactly* it's lua version:
-    https://github.com/szagoruyko/wide-residual-networks
+    https://github.com/szagoruyko/diracnets
+    https://arxiv.org/abs/1706.00388
 
-    2016 Sergey Zagoruyko
+    2017 Sergey Zagoruyko
 """
 
 import argparse
@@ -22,10 +22,8 @@ from torch.autograd import Variable
 import torch.nn.functional as F
 import torchnet as tnt
 from torchnet.engine import Engine
-from models.utils import cast, data_parallel
+from diracnet import cast, data_parallel, define_diracnet
 import torch.backends.cudnn as cudnn
-import models
-from logger import VariableLogger
 
 cudnn.benchmark = True
 
@@ -49,7 +47,6 @@ parser.add_argument('--epoch_step', default='[60,120,160]', type=str,
                     help='json list with epochs to drop lr on')
 parser.add_argument('--lr_decay_ratio', default=0.2, type=float)
 parser.add_argument('--resume', default='', type=str)
-parser.add_argument('--optim_method', default='SGD', type=str)
 parser.add_argument('--randomcrop_pad', default=4, type=float)
 
 # Device options
@@ -62,26 +59,66 @@ parser.add_argument('--gpu_id', default='0', type=str,
                     help='id(s) for CUDA_VISIBLE_DEVICES')
 
 
-def create_dataset(opt, mode):
-    convert = tnt.transform.compose([
-        lambda x: x.astype(np.float32),
-        T.Normalize([125.3, 123.0, 113.9], [63.0, 62.1, 66.7]),
-        lambda x: x.transpose(2,0,1),
-        torch.from_numpy,
-    ])
+def create_iterator(opt, mode):
+    if opt.dataset.startswith('CIFAR'):
+        convert = tnt.transform.compose([
+            lambda x: x.astype(np.float32),
+            T.Normalize([125.3, 123.0, 113.9], [63.0, 62.1, 66.7]),
+            lambda x: x.transpose(2,0,1),
+            torch.from_numpy,
+        ])
 
-    train_transform = tnt.transform.compose([
-        T.RandomHorizontalFlip(),
-        T.Pad(opt.randomcrop_pad, cv2.BORDER_REFLECT),
-        T.RandomCrop(32),
-        convert,
-    ])
+        train_transform = tnt.transform.compose([
+            T.RandomHorizontalFlip(),
+            T.Pad(opt.randomcrop_pad, cv2.BORDER_REFLECT),
+            T.RandomCrop(32),
+            convert,
+        ])
 
-    ds = getattr(datasets, opt.dataset)(opt.dataroot, train=mode, download=True)
-    smode = 'train' if mode else 'test'
-    ds = tnt.dataset.TensorDataset([getattr(ds, smode + '_data'),
-                                    getattr(ds, smode + '_labels')])
-    return ds.transform({0: train_transform if mode else convert})
+        ds = getattr(datasets, opt.dataset)(opt.dataroot, train=mode, download=True)
+        smode = 'train' if mode else 'test'
+        ds = tnt.dataset.TensorDataset([getattr(ds, smode + '_data'),
+                                        getattr(ds, smode + '_labels')])
+        ds = ds.transform({0: train_transform if mode else convert})
+        return ds.parallel(batch_size=opt.batchSize, shuffle=mode,
+                           num_workers=opt.nthread, pin_memory=True)
+
+    elif opt.dataset == 'ImageNet':
+
+        def cvload(path):
+            img = cv2.imread(path, cv2.IMREAD_COLOR)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            return img
+
+        convert = tnt.transform.compose([
+            lambda x: x.astype(np.float32) / 255.0,
+            T.Normalize(mean=[0.485, 0.456, 0.406],
+                                   std=[0.229, 0.224, 0.225]),
+            lambda x: x.transpose(2, 0, 1).astype(np.float32),
+            torch.from_numpy,
+        ])
+
+        print("| setting up data loader...")
+        if mode:
+            traindir = os.path.join(opt.imagenetpath, 'train')
+            ds = datasets.ImageFolder(traindir, tnt.transform.compose([
+                T.RandomSizedCrop(224),
+                T.RandomHorizontalFlip(),
+                convert,
+            ]), loader=cvload)
+        else:
+            valdir = os.path.join(opt.imagenetpath, 'val')
+            ds = datasets.ImageFolder(valdir, tnt.transform.compose([
+                T.Scale(256),
+                T.CenterCrop(224),
+                convert,
+            ]), loader=cvload)
+
+        return torch.utils.data.DataLoader(ds,
+                                           batch_size=opt.batchSize, shuffle=mode,
+                                           num_workers=opt.nthread, pin_memory=False)
+    else:
+        raise ValueError('dataset not understood')
 
 
 def main():
@@ -95,16 +132,10 @@ def main():
     torch.randn(8).cuda()
     os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
-    def create_iterator(mode):
-        ds = create_dataset(opt, mode)
-        return ds.parallel(batch_size=opt.batchSize, shuffle=mode,
-                           num_workers=opt.nthread, pin_memory=True)
+    train_loader = create_iterator(opt, True)
+    test_loader = create_iterator(opt, False)
 
-    train_loader = create_iterator(True)
-    test_loader = create_iterator(False)
-
-    f, params, stats = getattr(models, opt.model)(opt.depth, opt.width,
-                                                  num_classes, opt)
+    f, params, stats = define_diracnet(opt.depth, opt.width, opt.dataset)
 
     def create_optimizer(opt, lr):
         print 'creating optimizer with lr = ', lr
@@ -134,15 +165,12 @@ def main():
     print '\nTotal number of parameters:', n_parameters
 
     meter_loss = tnt.meter.AverageValueMeter()
-    classacc = tnt.meter.ClassErrorMeter(accuracy=True)
+    classacc = tnt.meter.ClassErrorMeter(topk=[1, 5], accuracy=True)
     timer_train = tnt.meter.TimeMeter('s')
     timer_test = tnt.meter.TimeMeter('s')
 
     if not os.path.exists(opt.save):
         os.mkdir(opt.save)
-
-    logger = VariableLogger(params, os.path.join(opt.save, 'log_params.txt'))
-    logger.checkpoint()
 
     def h(sample):
         inputs = Variable(cast(sample[0], opt.dtype))
@@ -157,11 +185,7 @@ def main():
                         epoch=t['epoch']),
                    open(os.path.join(opt.save, 'model.pt7'), 'w'))
         z = vars(opt).copy(); z.update(t)
-        logname = os.path.join(opt.save, 'log.txt')
-        with open(logname, 'a') as f:
-            f.write('json_stats: ' + json.dumps(z) + '\n')
         print z
-        logger.checkpoint()
 
     def on_sample(state):
         state['sample'].append(state['train'])
@@ -194,10 +218,10 @@ def main():
 
         engine.test(h, test_loader)
 
-        test_acc = classacc.value()[0]
+        test_acc = classacc.value()
         print log({
             "train_loss": train_loss[0],
-            "train_acc": train_acc[0],
+            "train_acc": train_acc,
             "test_loss": meter_loss.value()[0],
             "test_acc": test_acc,
             "epoch": state['epoch'],

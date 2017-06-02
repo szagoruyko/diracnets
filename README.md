@@ -1,7 +1,9 @@
 DiracNets
 =========
 
-PyTorch code and models for *DiracNets: Training Very Deep Neural Networks Without Skip-Connections*.
+PyTorch code and models for *DiracNets: Training Very Deep Neural Networks Without Skip-Connections*
+
+<https://arxiv.org/abs/1706.00388>
 
 Networks with skip-connections like ResNet show excellent performance in image recognition benchmarks, but do not benefit from increased depth, we are thus still interested in learning __actually__ deep representations, and the benefits they could bring. We propose a simple weight parameterization, which improves training of deep plain (without skip-connections) networks, and allows training plain networks with hundreds of layers. Accuracy of our proposed DiracNets is close to Wide ResNet (although DiracNets need more parameters to achieve it), and we are able to outperform ResNet-1000 with plain DiracNet with only 34 layers. Also, the proposed Dirac weight parameterization can be folded into one filter for inference, leading to easily interpretable VGG-like network.
 
@@ -10,21 +12,22 @@ Networks with skip-connections like ResNet show excellent performance in image r
 
 ## TL;DR
 
-In a nutshell, Dirac parameterization is a sum of filters and Dirac delta function:
+In a nutshell, Dirac parameterization is a sum of filters and scaled Dirac delta function:
 
 ```
-conv2d(x, delta + W)
+conv2d(x, alpha * delta + W)
 ```
 
-To plug it into a plain network, we add learnable scalar parameters `alpha`, `beta` and weight normalization.
-Here is simplified PyTorch-like pseudocode for the function:
+Here is simplified PyTorch-like pseudocode for the function we use to train plain DiracNets (with weight normalization):
 
 ```python
 def dirac_conv2d(input, W, alpha, beta)
     return F.conv2d(input, alpha * dirac(W) + beta * normalize(W))
 ```
 
-where `normalize` does l_2 normalization over each feature plane. We also use NCReLU (negative CReLU) nonlinearity:
+where `alpha` and `beta` are scaling scalars, and `normalize` does l_2 normalization over each feature plane.
+
+We also use NCReLU (negative CReLU) nonlinearity:
 
 ```python
 def ncrelu(x):
@@ -40,6 +43,7 @@ Code structure:
 ├── [diracconv.py](diracconv.py)    # modular DiracConv definitions<br>
 ├── [test.py](test.py)              # unit tests<br>
 ├── [diracnet-export.ipynb](diracnet-export.ipynb) # ImageNet pretrained models<br>
+├── [diracnet.py](diracnet.py)      # functional model definitions<br>
 └── [train.py](train.py)            # CIFAR and ImageNet training code<br>
 
 ### Requirements
@@ -66,8 +70,7 @@ pip install -r requirements.txt
 
 ### nn.Module code
 
-We provide `DiracConv1d`, `DiracConv2d`, `DiracConv3d`, which work like `nn.Conv1d`, `nn.Conv2d`, `nn.Conv3d`, but have Dirac-parametrization inside.
-Our training code doesn't use these modules, and uses only functional interface to PyTorch, `torch.nn.functional`.
+We provide `DiracConv1d`, `DiracConv2d`, `DiracConv3d`, which work like `nn.Conv1d`, `nn.Conv2d`, `nn.Conv3d`, but have Dirac-parametrization inside (our training code doesn't use these modules though).
 
 
 ### Pretrained models
@@ -127,6 +130,10 @@ Sequential (
   (fc): Linear (384 -> 1000)
 )
 ```
+
+Pretrained weights for this model: <https://www.dropbox.com/s/0z8ko3aqbuk2hov/diracnet-18-0.75-export.hkl?dl=0>
+
+We plan to add more pretrained models later.
 
 ## Bibtex
 
