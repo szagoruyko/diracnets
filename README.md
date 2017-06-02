@@ -67,6 +67,19 @@ Finally, install other Python packages:
 pip install -r requirements.txt
 ```
 
+To train DiracNet-34-2 on CIFAR do:
+
+```
+python train.py --save ./logs/diracnets_$RANDOM$RANDOM --depth 34 --width 2
+```
+
+To train DiracNet-18 on ImageNet do:
+
+```bash
+python train.py --dataroot ~/ILSVRC2012/ --dataset ImageNet --depth 18 --save ./logs/diracnet_$RANDOM$RANDOM \
+                --batchSize 256 --epoch_step [30,60,90] --epochs 100 --weightDecay 0.0001 --lr_decay_ratio 0.1
+```
+
 
 ### nn.Module code
 
