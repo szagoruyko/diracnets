@@ -83,9 +83,8 @@ We provide printout of DiracNet-18-0.75 sequential model for reference:
 
 ```
 Sequential (
-  (conv): Conv2d(3, 48, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+  (conv): Conv2d(3, 48, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3))
   (max_pool0): MaxPool2d (size=(3, 3), stride=(2, 2), padding=(1, 1), dilation=(1, 1))
-  (group0.block0.bn): Affine(48)
   (group0.block0.ncrelu): NCReLU()
   (group0.block0.conv): Conv2d(96, 48, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
   (group0.block1.ncrelu): NCReLU()
@@ -93,9 +92,8 @@ Sequential (
   (group0.block2.ncrelu): NCReLU()
   (group0.block2.conv): Conv2d(96, 48, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
   (group0.block3.ncrelu): NCReLU()
-  (group0.block3.conv): Conv2d(96, 48, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+  (group0.block3.conv): Conv2d(96, 48, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
   (max_pool1): MaxPool2d (size=(2, 2), stride=(2, 2), dilation=(1, 1))
-  (group1.block0.bn): Affine(48)
   (group1.block0.ncrelu): NCReLU()
   (group1.block0.conv): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
   (group1.block1.ncrelu): NCReLU()
@@ -103,9 +101,8 @@ Sequential (
   (group1.block2.ncrelu): NCReLU()
   (group1.block2.conv): Conv2d(192, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
   (group1.block3.ncrelu): NCReLU()
-  (group1.block3.conv): Conv2d(192, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+  (group1.block3.conv): Conv2d(192, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
   (max_pool2): MaxPool2d (size=(2, 2), stride=(2, 2), dilation=(1, 1))
-  (group2.block0.bn): Affine(96)
   (group2.block0.ncrelu): NCReLU()
   (group2.block0.conv): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
   (group2.block1.ncrelu): NCReLU()
@@ -113,9 +110,8 @@ Sequential (
   (group2.block2.ncrelu): NCReLU()
   (group2.block2.conv): Conv2d(384, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
   (group2.block3.ncrelu): NCReLU()
-  (group2.block3.conv): Conv2d(384, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+  (group2.block3.conv): Conv2d(384, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
   (max_pool3): MaxPool2d (size=(2, 2), stride=(2, 2), dilation=(1, 1))
-  (group3.block0.bn): Affine(192)
   (group3.block0.ncrelu): NCReLU()
   (group3.block0.conv): Conv2d(384, 384, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
   (group3.block1.ncrelu): NCReLU()
@@ -131,7 +127,7 @@ Sequential (
 )
 ```
 
-Pretrained weights for this model: <https://www.dropbox.com/s/0z8ko3aqbuk2hov/diracnet-18-0.75-export.hkl?dl=0>
+Pretrained weights for this model: <https://www.dropbox.com/s/0j1dnixlzdr5byc/diracnet-18-0.75-br-export.hkl?dl=0>
 
 We plan to add more pretrained models later.
 
