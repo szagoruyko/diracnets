@@ -142,6 +142,8 @@ Sequential (
 
 Pretrained weights for this model: <https://www.dropbox.com/s/0j1dnixlzdr5byc/diracnet-18-0.75-br-export.hkl?dl=0>
 
+Pretrained weights for the original (not folded) model: <https://www.dropbox.com/s/cyp2dhqhffdtlmo/diracnet-18-0.75-br.hkl?dl=0> (functional definition only)
+
 We plan to add more pretrained models later.
 
 ## Bibtex
