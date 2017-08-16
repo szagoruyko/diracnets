@@ -5,11 +5,17 @@ import torch.nn.functional as F
 from torch.nn.init import dirac
 
 
+
 def dirac_delta(ni, no, k):
     n = min(ni, no)
     size = (n, n) + k
     repeats = (max(no // ni, 1), max(ni // no, 1)) + (1,) * len(k)
     return dirac(torch.Tensor(*size)).repeat(*repeats)
+
+
+def normalize(w):
+    """Normalizes weight tensor over full filter."""
+    return F.normalize(w.view(w.size(0), -1)).view_as(w)
 
 
 class DiracConv1d(nn.Conv1d):
@@ -35,9 +41,7 @@ class DiracConv1d(nn.Conv1d):
         assert self.delta.size() == self.weight.size()
 
     def forward(self, input):
-        alpha = self.alpha.expand_as(self.weight)
-        beta = self.beta.expand_as(self.weight)
-        return F.conv1d(input, alpha * Variable(self.delta) + beta * self.weight,
+        return F.conv1d(input, self.alpha * Variable(self.delta) + self.beta * normalize(self.weight),
                         self.bias, self.stride, self.padding, self.dilation)
 
 
@@ -64,9 +68,7 @@ class DiracConv2d(nn.Conv2d):
         assert self.delta.size() == self.weight.size()
 
     def forward(self, input):
-        alpha = self.alpha.expand_as(self.weight)
-        beta = self.beta.expand_as(self.weight)
-        return F.conv2d(input, alpha * Variable(self.delta) + beta * self.weight,
+        return F.conv2d(input, self.alpha * Variable(self.delta) + self.beta * normalize(self.weight),
                         self.bias, self.stride, self.padding, self.dilation)
 
 
@@ -93,7 +95,5 @@ class DiracConv3d(nn.Conv3d):
         assert self.delta.size() == self.weight.size()
 
     def forward(self, input):
-        alpha = self.alpha.expand_as(self.weight)
-        beta = self.beta.expand_as(self.weight)
-        return F.conv3d(input, alpha * Variable(self.delta) + beta * self.weight,
+        return F.conv3d(input, self.alpha * Variable(self.delta) + self.beta * normalize(self.weight),
                         self.bias, self.stride, self.padding, self.dilation)
