@@ -91,8 +91,8 @@ def size2name(size):
 
 def block(o, params, stats, base, mode, j):
     w = params[base + '.conv']
-    alpha = params[base + '.alpha'].expand_as(w)
-    beta = params[base + '.beta'].expand_as(w)
+    alpha = params[base + '.alpha']
+    beta = params[base + '.beta']
     delta = Variable(stats[size2name(w.size())])
     w = beta * F.normalize(w.view(w.size(0), -1)).view_as(w) + alpha * delta
     o = F.conv2d(ncrelu(o), w, stride=1, padding=1)
@@ -147,7 +147,7 @@ def define_diracnet(depth, width, dataset):
         stats['bn'] = bnstats(widths[0])
 
     elif dataset == 'ImageNet':
-        definitions = {18: [2, 2, 2, 2], 34: [3, 4, 6, 5]}
+        definitions = {18: [2, 2, 2, 2], 34: [3, 4, 6, 3]}
         widths = torch.Tensor([64, 128, 256, 512]).mul(width).int()
         blocks = definitions[depth]
 
