@@ -1,3 +1,4 @@
+from __future__ import print_function
 from functools import partial
 from nested_dict import nested_dict
 from collections import OrderedDict
@@ -22,7 +23,7 @@ def ncrelu(x):
 
 def cast(params, dtype='float'):
     if isinstance(params, dict):
-        return {k: cast(v, dtype) for k, v in params.items()}
+        return {k: cast(v, dtype) for k, v in list(params.items())}
     else:
         return getattr(params.cuda() if torch.cuda.is_available() else params, dtype)()
 
@@ -52,7 +53,7 @@ def data_parallel(f, input, params, stats, mode, device_ids, output_device=None)
 
     def replicate(param_dict, g):
         replicas = [{} for d in device_ids]
-        for k,v in param_dict.iteritems():
+        for k,v in param_dict.items():
             for i,u in enumerate(g(v)):
                 replicas[i][k] = u
         return replicas
@@ -185,7 +186,7 @@ def define_diracnet(depth, width, dataset):
     flat_params = flatten_params(params)
     flat_stats = flatten_stats(stats)
 
-    for k, v in flat_params.items():
+    for k, v in list(flat_params.items()):
         if k.find('.conv') > -1:
             no, ni, kh, kw = v.size()
             # to optimize for memory we keep only one dirac-tensor per size
