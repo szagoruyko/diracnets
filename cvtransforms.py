@@ -1,7 +1,9 @@
+from __future__ import division
+from __future__ import print_function
 """ OpenCV-based transforms
     Operate on np.ndarrays only, no PIL or torch dependency
 """
-from __future__ import division
+
 import math
 import random
 import numpy as np

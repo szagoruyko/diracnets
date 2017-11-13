@@ -4,3 +4,4 @@ torch
 torchnet
 torchvision
 tqdm
+nested_dict
