@@ -128,9 +128,10 @@ def main():
     num_classes = 10 if opt.dataset == 'CIFAR10' else 100
 
     os.environ['CUDA_VISIBLE_DEVICES'] = opt.gpu_id
-    # to prevent opencv from initializing CUDA in workers
-    torch.randn(8).cuda()
-    os.environ['CUDA_VISIBLE_DEVICES'] = ''
+    if torch.cuda.is_available():
+        # to prevent opencv from initializing CUDA in workers
+        torch.randn(8).cuda()
+        os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
     train_loader = create_iterator(opt, True)
     test_loader = create_iterator(opt, False)
