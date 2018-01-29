@@ -1,4 +1,3 @@
-from __future__ import print_function
 import unittest
 import torch
 from diracconv import DiracConv1d, DiracConv2d, DiracConv3d

@@ -1,4 +1,3 @@
-from __future__ import print_function
 from functools import partial
 from nested_dict import nested_dict
 from collections import OrderedDict
@@ -9,16 +8,8 @@ from torch.nn.init import dirac, kaiming_normal
 import torch.cuda.comm as comm
 from torch.nn.parallel._functions import Broadcast
 from torch.nn.parallel import scatter, parallel_apply, gather
-
-
-def dirac_delta(ni, no, k):
-    n = min(ni, no)
-    return dirac(torch.Tensor(n, n, k, k)).repeat(max(no // ni, 1), max(ni // no, 1), 1, 1)
-
-
-def ncrelu(x):
-    return torch.cat([x.clamp(min=0),
-                      x.clamp(max=0)], dim=1)
+from torch import nn
+from torch.utils import model_zoo
 
 
 def cast(params, dtype='float'):
@@ -29,7 +20,7 @@ def cast(params, dtype='float'):
 
 
 def conv_params(ni, no, k=1, gain=1.0):
-    return cast(torch.Tensor(no, ni * 2, k, k).normal_(std=gain))
+    return cast(torch.Tensor(no, ni, k, k).normal_(std=gain))
 
 
 def linear_params(ni, no):
@@ -45,24 +36,21 @@ def bnstats(n):
 
 
 def data_parallel(f, input, params, stats, mode, device_ids, output_device=None):
+    assert isinstance(device_ids, list)
     if output_device is None:
         output_device = device_ids[0]
 
     if len(device_ids) == 1:
         return f(input, params, stats, mode)
 
-    def replicate(param_dict, g):
-        replicas = [{} for d in device_ids]
-        for k,v in param_dict.items():
-            for i,u in enumerate(g(v)):
-                replicas[i][k] = u
-        return replicas
-
-    params_replicas = replicate(params, lambda x: Broadcast(device_ids)(x))
-    stats_replicas = replicate(stats, lambda x: comm.broadcast(x, device_ids))
+    params_all = Broadcast.apply(device_ids, *params.values())
+    params_replicas = [{k: params_all[i + j*len(params)] for i, k in enumerate(params.keys())}
+                       for j in range(len(device_ids))]
+    stats_replicas = [dict(zip(stats.keys(), p))
+                      for p in comm.broadcast_coalesced(list(stats.values()), device_ids)]
 
     replicas = [partial(f, params=p, stats=s, mode=mode)
-                for p,s in zip(params_replicas, stats_replicas)]
+                for p, s in zip(params_replicas, stats_replicas)]
     inputs = scatter([input], device_ids)
     outputs = parallel_apply(replicas, inputs)
     return gather(outputs, output_device)
@@ -92,11 +80,11 @@ def size2name(size):
 
 def block(o, params, stats, base, mode, j):
     w = params[base + '.conv']
-    alpha = params[base + '.alpha']
-    beta = params[base + '.beta']
+    alpha = params[base + '.alpha'].view(-1,1,1,1)
+    beta = params[base + '.beta'].view(-1,1,1,1)
     delta = Variable(stats[size2name(w.size())])
     w = beta * F.normalize(w.view(w.size(0), -1)).view_as(w) + alpha * delta
-    o = F.conv2d(ncrelu(o), w, stride=1, padding=1)
+    o = F.conv2d(F.relu(o), w, stride=1, padding=1)
     o = batch_norm(o, params, stats, base + '.bn', mode)
     return o
 
@@ -110,9 +98,9 @@ def group(o, params, stats, base, mode, count):
 def define_diracnet(depth, width, dataset):
 
     def gen_group_params(ni, no, count):
-        return {'block%d' % i: {'conv': conv_params(ni if i == 0 else no, no, k=3, gain=0.1),
-                                'alpha': cast(torch.Tensor([5])),
-                                'beta': cast(torch.Tensor([1e-3])),
+        return {'block%d' % i: {'conv': conv_params(ni if i == 0 else no, no, k=3, gain=1),
+                                'alpha': cast(torch.Tensor([1])),
+                                'beta': cast(torch.Tensor([0.1])),
                                 'bn': bnparams(no)} for i in range(count)}
 
     def gen_group_stats(no, count):
@@ -188,8 +176,59 @@ def define_diracnet(depth, width, dataset):
 
     for k, v in list(flat_params.items()):
         if k.find('.conv') > -1:
-            no, ni, kh, kw = v.size()
-            # to optimize for memory we keep only one dirac-tensor per size
-            flat_stats[size2name(v.size())] = cast(dirac_delta(ni, no, kh))
+            flat_stats[size2name(v.size())] = cast(dirac(v.data.clone()))
 
     return f, flat_params, flat_stats
+
+
+model_urls = {
+    'diracnet18': 'https://s3.amazonaws.com/modelzoo-networks/diracnet18v2folded-a2174e15.pth',
+    'diracnet34': 'https://s3.amazonaws.com/modelzoo-networks/diracnet34v2folded-dfb15d34.pth'
+}
+
+
+class DiracNet(nn.Module):
+
+    widths = (64, 128, 256, 512)
+    block_depths = {18: torch.IntTensor((2, 2, 2, 2)) * 2,
+                    34: torch.IntTensor((3, 4, 6, 3)) * 2}
+
+    def __init__(self, depth=18):
+        super().__init__()
+        self.features = nn.Sequential()
+        n_channels = self.widths[0]
+        self.features.add_module('conv', nn.Conv2d(3, n_channels, kernel_size=7, stride=2, padding=3))
+        self.features.add_module('max_pool0', nn.MaxPool2d(3, 2, 1))
+        for group_id, (width, block_depth) in enumerate(zip(self.widths, self.block_depths[depth])):
+            for block_id in range(block_depth):
+                name = 'group{}.block{}.'.format(group_id, block_id)
+                self.features.add_module(name + 'relu', nn.ReLU())
+                self.features.add_module(name + 'conv', nn.Conv2d(n_channels, width, kernel_size=3, padding=1))
+                n_channels = width
+            if group_id != 3:
+                self.features.add_module('max_pool{}'.format(group_id + 1), nn.MaxPool2d(2))
+            else:
+                self.features.add_module('last_relu', nn.ReLU())
+                self.features.add_module('avg_pool', nn.AvgPool2d(7))
+        self.fc = nn.Linear(in_features=512, out_features=1000)
+
+    def forward(self, x):
+        x = self.features(x)
+        x = x.view(x.shape[0], -1)
+        x = self.fc(x)
+        return x
+
+
+def diracnet18(pretrained=False):
+    model = DiracNet(18)
+    if pretrained:
+        model.load_state_dict(model_zoo.load_url(model_urls['diracnet18']))
+    return model
+
+
+def diracnet34(pretrained=False):
+    model = DiracNet(34)
+    if pretrained:
+        model.load_state_dict(model_zoo.load_url(model_urls['diracnet34']))
+    return model
+

@@ -1,13 +1,24 @@
 DiracNets
 =========
 
+### v2 update (January 2018):
+
+The code was updated for DiracNets-v2 in which we removed NCReLU by adding per-channel `a` and `b` multipliers without weight decay.
+This allowed us to significantly simplify the network, which is now folds into a simple chain of convolution-ReLU layers, like VGG.
+On ImageNet DiracNet-18 and DiracNet-34 closely match corresponding ResNet with the same number of parameters.
+
+See v1 branch for DiracNet-v1.
+
+-----
+
 PyTorch code and models for *DiracNets: Training Very Deep Neural Networks Without Skip-Connections*
 
 <https://arxiv.org/abs/1706.00388>
 
-Networks with skip-connections like ResNet show excellent performance in image recognition benchmarks, but do not benefit from increased depth, we are thus still interested in learning __actually__ deep representations, and the benefits they could bring. We propose a simple weight parameterization, which improves training of deep plain (without skip-connections) networks, and allows training plain networks with hundreds of layers. Accuracy of our proposed DiracNets is close to Wide ResNet (although DiracNets need more parameters to achieve it), and we are able to outperform ResNet-1000 with plain DiracNet with only 34 layers. Also, the proposed Dirac weight parameterization can be folded into one filter for inference, leading to easily interpretable VGG-like network.
+Networks with skip-connections like ResNet show excellent performance in image recognition benchmarks, but do not benefit from increased depth, we are thus still interested in learning __actually__ deep representations, and the benefits they could bring. We propose a simple weight parameterization, which improves training of deep plain (without skip-connections) networks, and allows training plain networks with hundreds of layers. Accuracy of our proposed DiracNets is close to Wide ResNet (although DiracNets need more parameters to achieve it), and we are able to match ResNet-1000 accuracy with plain DiracNet with only 28 layers. Also, the proposed Dirac weight parameterization can be folded into one filter for inference, leading to easily interpretable VGG-like network.
 
-<img src=http://imagine.enpc.fr/~zagoruys/delta-circles.svg>
+DiracNets on ImageNet:
+<img src=http://imagine.enpc.fr/~zagoruys/img/diracnet_imagenet.svg>
 
 
 ## TL;DR
@@ -25,14 +36,7 @@ def dirac_conv2d(input, W, alpha, beta)
     return F.conv2d(input, alpha * dirac(W) + beta * normalize(W))
 ```
 
-where `alpha` and `beta` are scaling scalars, and `normalize` does l_2 normalization over each feature plane.
-
-We also use NCReLU (negative CReLU) nonlinearity:
-
-```python
-def ncrelu(x):
-    return torch.cat([x.clamp(min=0), x.clamp(max=0)], dim=1)
-```
+where `alpha` and `beta` are per-channel scaling multipliers, and `normalize` does l_2 normalization over each feature plane.
 
 
 ## Code
@@ -54,12 +58,7 @@ First install [PyTorch](https://pytorch.org), then install [torchnet](https://gi
 pip install git+https://github.com/pytorch/tnt.git@master
 ```
 
-Install [OpenCV](https://opencv.org) with Python bindings (e.g. `conda install -c menpo opencv3`), and `torchvision`
-with OpenCV transforms:
-
-```
-pip install git+https://github.com/szagoruyko/vision.git@opencv
-```
+Install [OpenCV](https://opencv.org) with Python bindings (e.g. `conda install -c menpo opencv3` or `conda install -c conda-forge opencv`)
 
 Finally, install other Python packages:
 
@@ -92,57 +91,71 @@ We fold batch normalization and Dirac parameterization into `F.conv2d` `weight` 
 
 See [diracnets.ipynb](diracnets.ipynb) for functional and modular model definitions.
 
-We provide printout of DiracNet-18-0.75 sequential model for reference:
+There is also folded DiracNet definition in `diracnet.py`, which uses code from PyTorch model_zoo and downloads pretrained model from Amazon S3:
+
+```python
+from diracnet import diracnet18
+model = diracnet18(pretrained=True)
+```
+
+Printout of the model above:
 
 ```
-Sequential (
-  (conv): Conv2d(3, 48, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3))
-  (max_pool0): MaxPool2d (size=(3, 3), stride=(2, 2), padding=(1, 1), dilation=(1, 1))
-  (group0.block0.ncrelu): NCReLU()
-  (group0.block0.conv): Conv2d(96, 48, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-  (group0.block1.ncrelu): NCReLU()
-  (group0.block1.conv): Conv2d(96, 48, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-  (group0.block2.ncrelu): NCReLU()
-  (group0.block2.conv): Conv2d(96, 48, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-  (group0.block3.ncrelu): NCReLU()
-  (group0.block3.conv): Conv2d(96, 48, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-  (max_pool1): MaxPool2d (size=(2, 2), stride=(2, 2), dilation=(1, 1))
-  (group1.block0.ncrelu): NCReLU()
-  (group1.block0.conv): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-  (group1.block1.ncrelu): NCReLU()
-  (group1.block1.conv): Conv2d(192, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-  (group1.block2.ncrelu): NCReLU()
-  (group1.block2.conv): Conv2d(192, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-  (group1.block3.ncrelu): NCReLU()
-  (group1.block3.conv): Conv2d(192, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-  (max_pool2): MaxPool2d (size=(2, 2), stride=(2, 2), dilation=(1, 1))
-  (group2.block0.ncrelu): NCReLU()
-  (group2.block0.conv): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-  (group2.block1.ncrelu): NCReLU()
-  (group2.block1.conv): Conv2d(384, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-  (group2.block2.ncrelu): NCReLU()
-  (group2.block2.conv): Conv2d(384, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-  (group2.block3.ncrelu): NCReLU()
-  (group2.block3.conv): Conv2d(384, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-  (max_pool3): MaxPool2d (size=(2, 2), stride=(2, 2), dilation=(1, 1))
-  (group3.block0.ncrelu): NCReLU()
-  (group3.block0.conv): Conv2d(384, 384, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-  (group3.block1.ncrelu): NCReLU()
-  (group3.block1.conv): Conv2d(768, 384, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-  (group3.block2.ncrelu): NCReLU()
-  (group3.block2.conv): Conv2d(768, 384, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-  (group3.block3.ncrelu): NCReLU()
-  (group3.block3.conv): Conv2d(768, 384, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-  (relu): ReLU ()
-  (avg_pool): AvgPool2d ()
-  (view): Flatten()
-  (fc): Linear (384 -> 1000)
+DiracNet(
+  (features): Sequential(
+    (conv): Conv2d (3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3))
+    (max_pool0): MaxPool2d(kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), dilation=(1, 1), ceil_mode=False)
+    (group0.block0.relu): ReLU()
+    (group0.block0.conv): Conv2d (64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (group0.block1.relu): ReLU()
+    (group0.block1.conv): Conv2d (64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (group0.block2.relu): ReLU()
+    (group0.block2.conv): Conv2d (64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (group0.block3.relu): ReLU()
+    (group0.block3.conv): Conv2d (64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (max_pool1): MaxPool2d(kernel_size=(2, 2), stride=(2, 2), dilation=(1, 1), ceil_mode=False)
+    (group1.block0.relu): ReLU()
+    (group1.block0.conv): Conv2d (64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (group1.block1.relu): ReLU()
+    (group1.block1.conv): Conv2d (128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (group1.block2.relu): ReLU()
+    (group1.block2.conv): Conv2d (128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (group1.block3.relu): ReLU()
+    (group1.block3.conv): Conv2d (128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (max_pool2): MaxPool2d(kernel_size=(2, 2), stride=(2, 2), dilation=(1, 1), ceil_mode=False)
+    (group2.block0.relu): ReLU()
+    (group2.block0.conv): Conv2d (128, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (group2.block1.relu): ReLU()
+    (group2.block1.conv): Conv2d (256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (group2.block2.relu): ReLU()
+    (group2.block2.conv): Conv2d (256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (group2.block3.relu): ReLU()
+    (group2.block3.conv): Conv2d (256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (max_pool3): MaxPool2d(kernel_size=(2, 2), stride=(2, 2), dilation=(1, 1), ceil_mode=False)
+    (group3.block0.relu): ReLU()
+    (group3.block0.conv): Conv2d (256, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (group3.block1.relu): ReLU()
+    (group3.block1.conv): Conv2d (512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (group3.block2.relu): ReLU()
+    (group3.block2.conv): Conv2d (512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (group3.block3.relu): ReLU()
+    (group3.block3.conv): Conv2d (512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (last_relu): ReLU()
+    (avg_pool): AvgPool2d(kernel_size=7, stride=7, padding=0, ceil_mode=False, count_include_pad=True)
+  )
+  (fc): Linear(in_features=512, out_features=1000)
 )
 ```
 
-Pretrained weights for this model: <https://www.dropbox.com/s/0j1dnixlzdr5byc/diracnet-18-0.75-br-export.hkl?dl=0>
+The models were trained with OpenCV, so you need to use it too to reproduce stated accuracy.
 
-Pretrained weights for the original (not folded) model: <https://www.dropbox.com/s/cyp2dhqhffdtlmo/diracnet-18-0.75-br.hkl?dl=0> (functional definition only)
+Pretrained weights for DiracNet-18 and DiracNet-34:<br>
+<https://s3.amazonaws.com/modelzoo-networks/diracnet18v2folded-a2174e15.pth><br>
+<https://s3.amazonaws.com/modelzoo-networks/diracnet34v2folded-dfb15d34.pth>
+
+Pretrained weights for the original (not folded) model,  functional definition only:<br>
+<https://s3.amazonaws.com/modelzoo-networks/diracnet18-v2_checkpoint.pt><br>
+<https://s3.amazonaws.com/modelzoo-networks/diracnet34-v2_checkpoint.pt>
 
 We plan to add more pretrained models later.
 
