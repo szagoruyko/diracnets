@@ -5,20 +5,25 @@ import torch.nn.functional as F
 from torch.nn.init import dirac
 
 
-
-def dirac_delta(ni, no, k):
-    n = min(ni, no)
-    size = (n, n) + k
-    repeats = (max(no // ni, 1), max(ni // no, 1)) + (1,) * len(k)
-    return dirac(torch.Tensor(*size)).repeat(*repeats)
-
-
 def normalize(w):
     """Normalizes weight tensor over full filter."""
     return F.normalize(w.view(w.size(0), -1)).view_as(w)
 
 
-class DiracConv1d(nn.Conv1d):
+class DiracConv(nn.Module):
+
+    def init_params(self, out_channels):
+        self.alpha = nn.Parameter(torch.Tensor(out_channels).fill_(1))
+        self.beta = nn.Parameter(torch.Tensor(out_channels).fill_(0.1))
+        self.register_buffer('delta', dirac(self.weight.data.clone()))
+        assert self.delta.size() == self.weight.size()
+        self.v = (-1,) + (1,) * (self.weight.dim() - 1)
+
+    def transform_weight(self):
+        return self.alpha.view(*self.v) * Variable(self.delta) + self.beta.view(*self.v) * normalize(self.weight)
+
+
+class DiracConv1d(nn.Conv1d, DiracConv):
     """Dirac parametrized convolutional layer.
 
     Works the same way as `nn.Conv1d`, but has additional weight parametrizatoin:
@@ -33,19 +38,14 @@ class DiracConv1d(nn.Conv1d):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, padding=0, dilation=1, bias=True):
-        super(DiracConv1d, self).__init__(in_channels, out_channels, kernel_size,
-                                          stride=1, padding=padding, dilation=dilation, bias=bias)
-        self.alpha = nn.Parameter(torch.Tensor([5]))
-        self.beta = nn.Parameter(torch.Tensor([1e-5]))
-        self.register_buffer('delta', dirac_delta(in_channels, out_channels, k=self.weight.size()[2:]))
-        assert self.delta.size() == self.weight.size()
+        super().__init__(in_channels, out_channels, kernel_size, stride=1, padding=padding, dilation=dilation, bias=bias)
+        self.init_params(out_channels)
 
     def forward(self, input):
-        return F.conv1d(input, self.alpha * Variable(self.delta) + self.beta * normalize(self.weight),
-                        self.bias, self.stride, self.padding, self.dilation)
+        return F.conv1d(input, self.transform_weight(), self.bias, self.stride, self.padding, self.dilation)
 
 
-class DiracConv2d(nn.Conv2d):
+class DiracConv2d(nn.Conv2d, DiracConv):
     """Dirac parametrized convolutional layer.
 
     Works the same way as `nn.Conv2d`, but has additional weight parametrizatoin:
@@ -60,19 +60,14 @@ class DiracConv2d(nn.Conv2d):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, padding=0, dilation=1, bias=True):
-        super(DiracConv2d, self).__init__(in_channels, out_channels, kernel_size,
-                                          stride=1, padding=padding, dilation=dilation, bias=bias)
-        self.alpha = nn.Parameter(torch.Tensor([5]))
-        self.beta = nn.Parameter(torch.Tensor([1e-5]))
-        self.register_buffer('delta', dirac_delta(in_channels, out_channels, self.weight.size()[2:]))
-        assert self.delta.size() == self.weight.size()
+        super().__init__(in_channels, out_channels, kernel_size, stride=1, padding=padding, dilation=dilation, bias=bias)
+        self.init_params(out_channels)
 
     def forward(self, input):
-        return F.conv2d(input, self.alpha * Variable(self.delta) + self.beta * normalize(self.weight),
-                        self.bias, self.stride, self.padding, self.dilation)
+        return F.conv2d(input, self.transform_weight(), self.bias, self.stride, self.padding, self.dilation)
 
 
-class DiracConv3d(nn.Conv3d):
+class DiracConv3d(nn.Conv3d, DiracConv):
     """Dirac parametrized convolutional layer.
 
     Works the same way as `nn.Conv3d`, but has additional weight parametrizatoin:
@@ -87,13 +82,8 @@ class DiracConv3d(nn.Conv3d):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, padding=0, dilation=1, bias=True):
-        super(DiracConv3d, self).__init__(in_channels, out_channels, kernel_size,
-                                          stride=1, padding=padding, dilation=dilation, bias=bias)
-        self.alpha = nn.Parameter(torch.Tensor([5]))
-        self.beta = nn.Parameter(torch.Tensor([1e-5]))
-        self.register_buffer('delta', dirac_delta(in_channels, out_channels, self.weight.size()[2:]))
-        assert self.delta.size() == self.weight.size()
+        super().__init__(in_channels, out_channels, kernel_size, stride=1, padding=padding, dilation=dilation, bias=bias)
+        self.init_params(out_channels)
 
     def forward(self, input):
-        return F.conv3d(input, self.alpha * Variable(self.delta) + self.beta * normalize(self.weight),
-                        self.bias, self.stride, self.padding, self.dilation)
+        return F.conv3d(input, self.transform_weight(), self.bias, self.stride, self.padding, self.dilation)

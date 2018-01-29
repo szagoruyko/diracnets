@@ -1,6 +1,5 @@
-from __future__ import print_function
 """
-    PyTorch training code for DiracNets
+    PyTorch training code for DiracNets-v2
 
     https://github.com/szagoruyko/diracnets
     https://arxiv.org/abs/1706.00388
@@ -15,7 +14,7 @@ import numpy as np
 import cv2
 from tqdm import tqdm
 import torch
-import torch.optim
+from torch.optim import SGD
 import torch.utils.data
 import cvtransforms as T
 import torchvision.datasets as datasets
@@ -140,7 +139,11 @@ def main():
 
     def create_optimizer(opt, lr):
         print('creating optimizer with lr = ', lr)
-        return torch.optim.SGD(list(params.values()), lr, 0.9, weight_decay=opt.weightDecay)
+        params_wd, params_rest = [], []
+        for k, v in params.items():
+            (params_wd if v.dim() > 1 else params_rest).append(v)
+        groups = [{'params': params_wd, 'weight_decay': opt.weight_decay}, {'params': params_rest}]
+        return SGD(groups, lr, 0.9)
 
     optimizer = create_optimizer(opt, opt.lr)
 
@@ -162,7 +165,7 @@ def main():
     for i, (key, v) in enumerate(stats.items()):
         print(str(i).ljust(5), key.ljust(kmax + 3), str(tuple(v.size())).ljust(23), torch.typename(v))
 
-    n_parameters = sum(p.numel() for p in list(params.values()))
+    n_parameters = sum(p.numel() for p in params.values())
     print('\nTotal number of parameters:', n_parameters)
 
     meter_loss = tnt.meter.AverageValueMeter()
@@ -192,8 +195,8 @@ def main():
         state['sample'].append(state['train'])
 
     def on_forward(state):
-        classacc.add(state['output'].data, torch.LongTensor(state['sample'][1]))
-        meter_loss.add(state['loss'].data[0])
+        classacc.add(state['output'].data, state['sample'][1])
+        meter_loss.add(float(state['loss']))
 
     def on_start(state):
         state['epoch'] = epoch
@@ -202,7 +205,7 @@ def main():
         classacc.reset()
         meter_loss.reset()
         timer_train.reset()
-        state['iterator'] = tqdm(train_loader, ncols=100)
+        state['iterator'] = tqdm(train_loader, dynamic_ncols=True)
 
         epoch = state['epoch'] + 1
         if epoch in epoch_step:
