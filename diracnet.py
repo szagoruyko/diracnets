@@ -118,7 +118,7 @@ def define_diracnet(depth, width, dataset):
             o = group(o, params, stats, 'group1', mode, n * 2)
             o = F.max_pool2d(o, 2)
             o = group(o, params, stats, 'group2', mode, n * 2)
-            o = F.avg_pool2d(o, 8)
+            o = F.avg_pool2d(F.relu(o), 8)
             o = F.linear(o.view(o.size(0), -1), params['fc.weight'], params['fc.bias'])
             return o
 
@@ -151,7 +151,7 @@ def define_diracnet(depth, width, dataset):
             o = group(o, params, stats, 'group2', mode, blocks[2] * 2)
             o = F.max_pool2d(o, 2)
             o = group(o, params, stats, 'group3', mode, blocks[3] * 2)
-            o = F.avg_pool2d(o, o.size(-1))
+            o = F.avg_pool2d(F.relu(o), o.size(-1))
             o = F.linear(o.view(o.size(0), -1), params['fc.weight'], params['fc.bias'])
             return o
 

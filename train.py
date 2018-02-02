@@ -11,13 +11,12 @@ import argparse
 import os
 import json
 import numpy as np
-import cv2
 from tqdm import tqdm
 import torch
 from torch.optim import SGD
-import torch.utils.data
-import cvtransforms as T
-import torchvision.datasets as datasets
+from torch.utils.data import DataLoader
+import torchvision.transforms as T
+from torchvision import datasets
 from torch.autograd import Variable
 import torch.nn.functional as F
 import torchnet as tnt
@@ -38,16 +37,15 @@ parser.add_argument('--dtype', default='float', type=str)
 parser.add_argument('--nthread', default=4, type=int)
 
 # Training options
-parser.add_argument('--batchSize', default=128, type=int)
+parser.add_argument('--batch_size', default=128, type=int)
 parser.add_argument('--lr', default=0.1, type=float)
 parser.add_argument('--epochs', default=200, type=int, metavar='N',
                     help='number of total epochs to run')
-parser.add_argument('--weightDecay', default=0.0005, type=float)
+parser.add_argument('--weight_decay', default=0.0005, type=float)
 parser.add_argument('--epoch_step', default='[60,120,160]', type=str,
                     help='json list with epochs to drop lr on')
 parser.add_argument('--lr_decay_ratio', default=0.2, type=float)
 parser.add_argument('--resume', default='', type=str)
-parser.add_argument('--randomcrop_pad', default=4, type=float)
 
 # Device options
 parser.add_argument('--cuda', action='store_true')
@@ -59,65 +57,51 @@ parser.add_argument('--gpu_id', default='0', type=str,
                     help='id(s) for CUDA_VISIBLE_DEVICES')
 
 
-def create_iterator(opt, mode):
+def create_iterator(opt, train):
     if opt.dataset.startswith('CIFAR'):
-        convert = tnt.transform.compose([
-            lambda x: x.astype(np.float32),
-            T.Normalize([125.3, 123.0, 113.9], [63.0, 62.1, 66.7]),
-            lambda x: x.transpose(2,0,1),
-            torch.from_numpy,
+        transform = T.Compose([
+            T.ToTensor(),
+            T.Normalize(np.array([125.3, 123.0, 113.9]) / 255.0,
+                        np.array([63.0, 62.1, 66.7]) / 255.0),
         ])
+        if train:
+            transform = T.Compose([
+                T.RandomHorizontalFlip(),
+                T.RandomCrop(32),
+                transform
+            ])
 
-        train_transform = tnt.transform.compose([
-            T.RandomHorizontalFlip(),
-            T.Pad(opt.randomcrop_pad, cv2.BORDER_REFLECT),
-            T.RandomCrop(32),
-            convert,
-        ])
-
-        ds = getattr(datasets, opt.dataset)(opt.dataroot, train=mode, download=True)
-        smode = 'train' if mode else 'test'
-        ds = tnt.dataset.TensorDataset([getattr(ds, smode + '_data'),
-                                        getattr(ds, smode + '_labels')])
-        ds = ds.transform({0: train_transform if mode else convert})
-        return ds.parallel(batch_size=opt.batchSize, shuffle=mode,
-                           num_workers=opt.nthread, pin_memory=True)
+        ds = getattr(datasets, opt.dataset)(opt.dataroot, train=train, download=True, transform=transform)
+        if train:
+            ds.train_data = np.pad(ds.train_data, ((0,0), (4,4), (4,4), (0,0)), mode='reflect')
 
     elif opt.dataset == 'ImageNet':
+        imagenetpath = os.path.expanduser(imagenetpath)
 
-        def cvload(path):
-            img = cv2.imread(path, cv2.IMREAD_COLOR)
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            return img
-
-        convert = tnt.transform.compose([
-            lambda x: x.astype(np.float32) / 255.0,
-            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            lambda x: x.transpose(2, 0, 1).astype(np.float32),
-            torch.from_numpy,
-        ])
+        normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
         print("| setting up data loader...")
-        if mode:
-            traindir = os.path.join(opt.dataroot, 'train')
-            ds = datasets.ImageFolder(traindir, tnt.transform.compose([
-                T.RandomSizedCrop(224),
+        if train:
+            traindir = os.path.join(imagenetpath, 'train')
+            ds = datasets.ImageFolder(traindir, T.Compose([
+                T.RandomResizedCrop(224),
                 T.RandomHorizontalFlip(),
-                convert,
-            ]), loader=cvload)
+                T.ToTensor(),
+                normalize,
+            ]))
         else:
-            valdir = os.path.join(opt.dataroot, 'val')
-            ds = datasets.ImageFolder(valdir, tnt.transform.compose([
-                T.Scale(256),
+            valdir = os.path.join(imagenetpath, 'val')
+            ds = datasets.ImageFolder(valdir, T.Compose([
+                T.Resize(256),
                 T.CenterCrop(224),
-                convert,
-            ]), loader=cvload)
+                T.ToTensor(),
+                normalize,
+            ]))
 
-        return torch.utils.data.DataLoader(ds,
-                                           batch_size=opt.batchSize, shuffle=mode,
-                                           num_workers=opt.nthread, pin_memory=False)
     else:
         raise ValueError('dataset not understood')
+    return DataLoader(ds, opt.batch_size, shuffle=train,
+                      num_workers=opt.nthread, pin_memory=torch.cuda.is_available())
 
 
 def main():
@@ -179,7 +163,7 @@ def main():
     def h(sample):
         inputs = Variable(cast(sample[0], opt.dtype))
         targets = Variable(cast(sample[1], 'long'))
-        y = data_parallel(f, inputs, params, stats, sample[2], np.arange(opt.ngpu))
+        y = data_parallel(f, inputs, params, stats, sample[2], list(np.arange(opt.ngpu)))
         return F.cross_entropy(y, targets), y
 
     def log(t, state):
