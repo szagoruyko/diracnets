@@ -152,8 +152,8 @@ Pretrained weights for DiracNet-18 and DiracNet-34:<br>
 <https://s3.amazonaws.com/modelzoo-networks/diracnet34v2folded-dfb15d34.pth>
 
 Pretrained weights for the original (not folded) model,  functional definition only:<br>
-<https://s3.amazonaws.com/modelzoo-networks/diracnet18-v2_checkpoint.pt><br>
-<https://s3.amazonaws.com/modelzoo-networks/diracnet34-v2_checkpoint.pt>
+<https://s3.amazonaws.com/modelzoo-networks/diracnet18-v2_checkpoint.pth><br>
+<https://s3.amazonaws.com/modelzoo-networks/diracnet34-v2_checkpoint.pth>
 
 We plan to add more pretrained models later.
 
