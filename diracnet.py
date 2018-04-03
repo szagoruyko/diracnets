@@ -99,8 +99,8 @@ def define_diracnet(depth, width, dataset):
 
     def gen_group_params(ni, no, count):
         return {'block%d' % i: {'conv': conv_params(ni if i == 0 else no, no, k=3, gain=1),
-                                'alpha': cast(torch.Tensor([1])),
-                                'beta': cast(torch.Tensor([0.1])),
+                                'alpha': cast(torch.ones(no).fill_(1)),
+                                'beta': cast(torch.ones(no).fill_(0.1)),
                                 'bn': bnparams(no)} for i in range(count)}
 
     def gen_group_stats(no, count):
