@@ -17,11 +17,10 @@ from torch.optim import SGD
 from torch.utils.data import DataLoader
 import torchvision.transforms as T
 from torchvision import datasets
-from torch.autograd import Variable
 import torch.nn.functional as F
 import torchnet as tnt
 from torchnet.engine import Engine
-from diracnet import cast, data_parallel, define_diracnet
+from diracnet import cast, data_parallel, define_diracnet, print_tensor_dict
 import torch.backends.cudnn as cudnn
 
 cudnn.benchmark = True
@@ -35,6 +34,7 @@ parser.add_argument('--dataset', default='CIFAR10', type=str)
 parser.add_argument('--dataroot', default='.', type=str)
 parser.add_argument('--dtype', default='float', type=str)
 parser.add_argument('--nthread', default=4, type=int)
+parser.add_argument('--imagenetpath', default='', type=str)
 
 # Training options
 parser.add_argument('--batch_size', default=128, type=int)
@@ -46,6 +46,7 @@ parser.add_argument('--epoch_step', default='[60,120,160]', type=str,
                     help='json list with epochs to drop lr on')
 parser.add_argument('--lr_decay_ratio', default=0.2, type=float)
 parser.add_argument('--resume', default='', type=str)
+parser.add_argument('--seed', default=1, type=int)
 
 # Device options
 parser.add_argument('--cuda', action='store_true')
@@ -57,7 +58,7 @@ parser.add_argument('--gpu_id', default='0', type=str,
                     help='id(s) for CUDA_VISIBLE_DEVICES')
 
 
-def create_iterator(opt, train):
+def create_dataset(opt, train):
     if opt.dataset.startswith('CIFAR'):
         transform = T.Compose([
             T.ToTensor(),
@@ -66,17 +67,15 @@ def create_iterator(opt, train):
         ])
         if train:
             transform = T.Compose([
+                T.Pad(4, padding_mode='reflect'),
                 T.RandomHorizontalFlip(),
                 T.RandomCrop(32),
                 transform
             ])
-
         ds = getattr(datasets, opt.dataset)(opt.dataroot, train=train, download=True, transform=transform)
-        if train:
-            ds.train_data = np.pad(ds.train_data, ((0,0), (4,4), (4,4), (0,0)), mode='reflect')
 
     elif opt.dataset == 'ImageNet':
-        imagenetpath = os.path.expanduser(imagenetpath)
+        imagenetpath = os.path.expanduser(opt.imagenetpath)
 
         normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
@@ -97,11 +96,9 @@ def create_iterator(opt, train):
                 T.ToTensor(),
                 normalize,
             ]))
-
     else:
         raise ValueError('dataset not understood')
-    return DataLoader(ds, opt.batch_size, shuffle=train,
-                      num_workers=opt.nthread, pin_memory=torch.cuda.is_available())
+    return ds
 
 
 def main():
@@ -110,20 +107,27 @@ def main():
     epoch_step = json.loads(opt.epoch_step)
     num_classes = 10 if opt.dataset == 'CIFAR10' else 100
 
+    torch.manual_seed(opt.seed)
     os.environ['CUDA_VISIBLE_DEVICES'] = opt.gpu_id
 
-    train_loader = create_iterator(opt, True)
-    test_loader = create_iterator(opt, False)
+    def create_iterator(mode):
+        return DataLoader(create_dataset(opt, mode), opt.batch_size, shuffle=mode,
+                          num_workers=opt.nthread, pin_memory=torch.cuda.is_available())
 
-    f, params, stats = define_diracnet(opt.depth, opt.width, opt.dataset)
+    train_loader = create_iterator(True)
+    test_loader = create_iterator(False)
+
+    f, params = define_diracnet(opt.depth, opt.width, opt.dataset)
 
     def create_optimizer(opt, lr):
         print('creating optimizer with lr = ', lr)
         params_wd, params_rest = [], []
         for k, v in params.items():
-            (params_wd if v.dim() > 1 else params_rest).append(v)
-        groups = [{'params': params_wd, 'weight_decay': opt.weight_decay}, {'params': params_rest}]
-        return SGD(groups, lr, 0.9)
+            if v.requires_grad:
+                (params_wd if v.dim() != 1 else params_rest).append(v)
+        groups = [{'params': params_wd, 'weight_decay': opt.weight_decay},
+                  {'params': params_rest}]
+        return SGD(groups, lr, momentum=0.9)
 
     optimizer = create_optimizer(opt, opt.lr)
 
@@ -131,25 +135,19 @@ def main():
     if opt.resume != '':
         state_dict = torch.load(opt.resume)
         epoch = state_dict['epoch']
-        params_tensors, stats = state_dict['params'], state_dict['stats']
+        params_tensors = state_dict['params']
         for k, v in params.items():
             v.data.copy_(params_tensors[k])
         optimizer.load_state_dict(state_dict['optimizer'])
 
     print('\nParameters:')
-    kmax = max(len(key) for key in list(params.keys()))
-    for i, (key, v) in enumerate(params.items()):
-        print(str(i).ljust(5), key.ljust(kmax + 3), str(tuple(v.size())).ljust(23), torch.typename(v.data))
-    print('\nAdditional buffers:')
-    kmax = max(len(key) for key in list(stats.keys()))
-    for i, (key, v) in enumerate(stats.items()):
-        print(str(i).ljust(5), key.ljust(kmax + 3), str(tuple(v.size())).ljust(23), torch.typename(v))
+    print_tensor_dict(params)
 
-    n_parameters = sum(p.numel() for p in params.values())
+    n_parameters = sum(p.numel() for p in params.values() if p.requires_grad)
     print('\nTotal number of parameters:', n_parameters)
 
     meter_loss = tnt.meter.AverageValueMeter()
-    classacc = tnt.meter.ClassErrorMeter(topk=[1, 5], accuracy=True)
+    classacc = tnt.meter.ClassErrorMeter(accuracy=True)
     timer_train = tnt.meter.TimeMeter('s')
     timer_test = tnt.meter.TimeMeter('s')
 
@@ -157,26 +155,28 @@ def main():
         os.mkdir(opt.save)
 
     def h(sample):
-        inputs = Variable(cast(sample[0], opt.dtype))
-        targets = Variable(cast(sample[1], 'long'))
-        y = data_parallel(f, inputs, params, stats, sample[2], list(np.arange(opt.ngpu)))
+        inputs = cast(sample[0], opt.dtype)
+        targets = cast(sample[1], 'long')
+        y = data_parallel(f, inputs, params, sample[2], range(opt.ngpu)).float()
         return F.cross_entropy(y, targets), y
 
     def log(t, state):
-        torch.save(dict(params={k: v.data for k, v in params.items()},
-                        stats=stats,
-                        optimizer=state['optimizer'].state_dict(),
-                        epoch=t['epoch']),
+        torch.save(dict(params=params, epoch=t['epoch'], optimizer=state['optimizer'].state_dict()),
                    os.path.join(opt.save, 'model.pt7'))
-        z = vars(opt).copy(); z.update(t)
+        z = {**vars(opt), **t}
+        with open(os.path.join(opt.save, 'log.txt'), 'a') as flog:
+            flog.write('json_stats: ' + json.dumps(z) + '\n')
         print(z)
 
     def on_sample(state):
         state['sample'].append(state['train'])
 
     def on_forward(state):
+        loss = float(state['loss'])
         classacc.add(state['output'].data, state['sample'][1])
-        meter_loss.add(float(state['loss']))
+        meter_loss.add(loss)
+        if state['train']:
+            state['iterator'].set_postfix(loss=loss)
 
     def on_start(state):
         state['epoch'] = epoch
@@ -200,12 +200,13 @@ def main():
         classacc.reset()
         timer_test.reset()
 
-        engine.test(h, test_loader)
+        with torch.no_grad():
+            engine.test(h, test_loader)
 
-        test_acc = classacc.value()
+        test_acc = classacc.value()[0]
         print(log({
             "train_loss": train_loss[0],
-            "train_acc": train_acc,
+            "train_acc": train_acc[0],
             "test_loss": meter_loss.value()[0],
             "test_acc": test_acc,
             "epoch": state['epoch'],
@@ -214,8 +215,8 @@ def main():
             "train_time": train_time,
             "test_time": timer_test.value(),
         }, state))
-        print('==> id: %s (%d/%d), test_acc: \33[91m%.2f\033[0m' % \
-                (opt.save, state['epoch'], opt.epochs, test_acc[0]))
+        print('==> id: %s (%d/%d), test_acc: \33[91m%.2f\033[0m' %
+              (opt.save, state['epoch'], opt.epochs, test_acc))
 
     engine = Engine()
     engine.hooks['on_sample'] = on_sample

@@ -1,11 +1,8 @@
 from functools import partial
 from nested_dict import nested_dict
-from collections import OrderedDict
 import torch
 import torch.nn.functional as F
-from torch.autograd import Variable
-from torch.nn.init import dirac, kaiming_normal
-import torch.cuda.comm as comm
+from torch.nn.init import dirac_, kaiming_normal_
 from torch.nn.parallel._functions import Broadcast
 from torch.nn.parallel import scatter, parallel_apply, gather
 from torch import nn
@@ -14,116 +11,116 @@ from torch.utils import model_zoo
 
 def cast(params, dtype='float'):
     if isinstance(params, dict):
-        return {k: cast(v, dtype) for k, v in list(params.items())}
+        return {k: cast(v, dtype) for k,v in params.items()}
     else:
         return getattr(params.cuda() if torch.cuda.is_available() else params, dtype)()
 
 
-def conv_params(ni, no, k=1, gain=1.0):
-    return cast(torch.Tensor(no, ni, k, k).normal_(std=gain))
+def conv_params(ni, no, k=1):
+    return kaiming_normal_(torch.Tensor(no, ni, k, k))
 
 
 def linear_params(ni, no):
-    return cast({'weight': kaiming_normal(torch.Tensor(no, ni)), 'bias': torch.zeros(no)})
+    return {'weight': kaiming_normal_(torch.Tensor(no, ni)), 'bias': torch.zeros(no)}
 
 
 def bnparams(n):
-    return cast({'weight': torch.rand(n), 'bias': torch.zeros(n)})
+    return {'weight': torch.rand(n),
+            'bias': torch.zeros(n),
+            'running_mean': torch.zeros(n),
+            'running_var': torch.ones(n)}
 
 
-def bnstats(n):
-    return cast({'running_mean': torch.zeros(n), 'running_var': torch.ones(n)})
-
-
-def data_parallel(f, input, params, stats, mode, device_ids, output_device=None):
+def data_parallel(f, input, params, mode, device_ids, output_device=None):
     assert isinstance(device_ids, list)
     if output_device is None:
         output_device = device_ids[0]
 
     if len(device_ids) == 1:
-        return f(input, params, stats, mode)
+        return f(input, params, mode)
 
     params_all = Broadcast.apply(device_ids, *params.values())
     params_replicas = [{k: params_all[i + j*len(params)] for i, k in enumerate(params.keys())}
                        for j in range(len(device_ids))]
-    stats_replicas = [dict(zip(stats.keys(), p))
-                      for p in comm.broadcast_coalesced(list(stats.values()), device_ids)]
 
-    replicas = [partial(f, params=p, stats=s, mode=mode)
-                for p, s in zip(params_replicas, stats_replicas)]
+    replicas = [partial(f, params=p, mode=mode)
+                for p in params_replicas]
     inputs = scatter([input], device_ids)
     outputs = parallel_apply(replicas, inputs)
     return gather(outputs, output_device)
 
 
-def flatten_params(params):
-    return OrderedDict(('.'.join(k), Variable(v, requires_grad=True))
-                       for k, v in nested_dict(params).iteritems_flat() if v is not None)
+def flatten(params):
+    return {'.'.join(k): v for k, v in nested_dict(params).items_flat() if v is not None}
 
 
-def flatten_stats(stats):
-    return OrderedDict(('.'.join(k), v)
-                       for k, v in nested_dict(stats).iteritems_flat())
-
-
-def batch_norm(x, params, stats, base, mode):
+def batch_norm(x, params, base, mode):
     return F.batch_norm(x, weight=params[base + '.weight'],
                         bias=params[base + '.bias'],
-                        running_mean=stats[base + '.running_mean'],
-                        running_var=stats[base + '.running_var'],
+                        running_mean=params[base + '.running_mean'],
+                        running_var=params[base + '.running_var'],
                         training=mode)
+
+
+def print_tensor_dict(params):
+    kmax = max(len(key) for key in params.keys())
+    for i, (key, v) in enumerate(params.items()):
+        print(str(i).ljust(5), key.ljust(kmax + 3), str(tuple(v.shape)).ljust(23), torch.typename(v), v.requires_grad)
+
+
+def set_requires_grad_except_bn_(params):
+    for k, v in params.items():
+        if not k.endswith('running_mean') and not k.endswith('running_var'):
+            v.requires_grad = True
 
 
 def size2name(size):
     return 'eye' + '_'.join(map(str, size))
 
 
-def block(o, params, stats, base, mode, j):
+def block(o, params, base, mode, j):
     w = params[base + '.conv']
-    alpha = params[base + '.alpha'].view(-1,1,1,1)
-    beta = params[base + '.beta'].view(-1,1,1,1)
-    delta = Variable(stats[size2name(w.size())])
-    w = beta * F.normalize(w.view(w.size(0), -1)).view_as(w) + alpha * delta
+    alpha = params[base + '.alpha'].view(-1, 1, 1, 1)
+    beta = params[base + '.beta'].view(-1, 1, 1, 1)
+    delta = params[size2name(w.shape)]
+    w = beta * F.normalize(w.view(w.shape[0], -1)).view_as(w) + alpha * delta
     o = F.conv2d(F.relu(o), w, stride=1, padding=1)
-    o = batch_norm(o, params, stats, base + '.bn', mode)
+    o = batch_norm(o, params, base + '.bn', mode)
     return o
 
 
-def group(o, params, stats, base, mode, count):
+def group(o, params, base, mode, count):
     for i in range(count):
-        o = block(o, params, stats, '%s.block%d' % (base, i), mode, i)
+        o = block(o, params, '%s.block%d' % (base, i), mode, i)
     return o
 
 
 def define_diracnet(depth, width, dataset):
 
     def gen_group_params(ni, no, count):
-        return {'block%d' % i: {'conv': conv_params(ni if i == 0 else no, no, k=3, gain=1),
+        return {'block%d' % i: {'conv': conv_params(ni if i == 0 else no, no, k=3),
                                 'alpha': cast(torch.ones(no).fill_(1)),
                                 'beta': cast(torch.ones(no).fill_(0.1)),
                                 'bn': bnparams(no)} for i in range(count)}
 
-    def gen_group_stats(no, count):
-        return {'block%d' % i: {'bn': bnstats(no)} for i in range(count)}
-
     if dataset.startswith('CIFAR'):
         n = (depth - 4) // 6
-        widths = torch.Tensor([16, 32, 64]).mul(width).int()
+        widths = [int(v * width) for v in (16, 32, 64)]
 
-        def f(inputs, params, stats, mode):
+        def f(inputs, params, mode):
             o = F.conv2d(inputs, params['conv'], padding=1)
-            o = F.relu(batch_norm(o, params, stats, 'bn', mode))
-            o = group(o, params, stats, 'group0', mode, n * 2)
+            o = F.relu(batch_norm(o, params, 'bn', mode))
+            o = group(o, params, 'group0', mode, n * 2)
             o = F.max_pool2d(o, 2)
-            o = group(o, params, stats, 'group1', mode, n * 2)
+            o = group(o, params, 'group1', mode, n * 2)
             o = F.max_pool2d(o, 2)
-            o = group(o, params, stats, 'group2', mode, n * 2)
+            o = group(o, params, 'group2', mode, n * 2)
             o = F.avg_pool2d(F.relu(o), 8)
             o = F.linear(o.view(o.size(0), -1), params['fc.weight'], params['fc.bias'])
             return o
 
         params = {
-            'conv': cast(kaiming_normal(torch.Tensor(widths[0], 3, 3, 3))),
+            'conv': cast(kaiming_normal_(torch.Tensor(widths[0], 3, 3, 3))),
             'bn': bnparams(widths[0]),
             'group0': gen_group_params(widths[0], widths[0], n * 2),
             'group1': gen_group_params(widths[0], widths[1], n * 2),
@@ -131,32 +128,29 @@ def define_diracnet(depth, width, dataset):
             'fc': linear_params(widths[2], 10 if dataset == 'CIFAR10' else 100),
         }
 
-        stats = {'group%d' % i: gen_group_stats(no, n * 2)
-                 for i, no in enumerate(widths)}
-        stats['bn'] = bnstats(widths[0])
-
     elif dataset == 'ImageNet':
-        definitions = {18: [2, 2, 2, 2], 34: [3, 4, 6, 3]}
-        widths = torch.Tensor([64, 128, 256, 512]).mul(width).int()
+        definitions = {18: [2, 2, 2, 2],
+                       34: [3, 4, 6, 3]}
+        widths = [int(width * v) for v in (64, 128, 256, 512)]
         blocks = definitions[depth]
 
-        def f(inputs, params, stats, mode):
+        def f(inputs, params, mode):
             o = F.conv2d(inputs, params['conv'], padding=3, stride=2)
-            o = batch_norm(o, params, stats, 'bn', mode)
+            o = batch_norm(o, params, 'bn', mode)
             o = F.max_pool2d(o, 3, 2, 1)
-            o = group(o, params, stats, 'group0', mode, blocks[0] * 2)
+            o = group(o, params, 'group0', mode, blocks[0] * 2)
             o = F.max_pool2d(o, 2)
-            o = group(o, params, stats, 'group1', mode, blocks[1] * 2)
+            o = group(o, params, 'group1', mode, blocks[1] * 2)
             o = F.max_pool2d(o, 2)
-            o = group(o, params, stats, 'group2', mode, blocks[2] * 2)
+            o = group(o, params, 'group2', mode, blocks[2] * 2)
             o = F.max_pool2d(o, 2)
-            o = group(o, params, stats, 'group3', mode, blocks[3] * 2)
+            o = group(o, params, 'group3', mode, blocks[3] * 2)
             o = F.avg_pool2d(F.relu(o), o.size(-1))
             o = F.linear(o.view(o.size(0), -1), params['fc.weight'], params['fc.bias'])
             return o
 
         params = {
-            'conv': cast(kaiming_normal(torch.Tensor(widths[0], 3, 7, 7))),
+            'conv': cast(kaiming_normal_(torch.Tensor(widths[0], 3, 7, 7))),
             'group0': gen_group_params(widths[0], widths[0], 2 * blocks[0]),
             'group1': gen_group_params(widths[0], widths[1], 2 * blocks[1]),
             'group2': gen_group_params(widths[1], widths[2], 2 * blocks[2]),
@@ -164,21 +158,18 @@ def define_diracnet(depth, width, dataset):
             'bn': bnparams(widths[0]),
             'fc': linear_params(widths[-1], 1000),
         }
-
-        stats = {'group%d' % i: gen_group_stats(no, 2 * b)
-                 for i, (no, b) in enumerate(zip(widths, blocks))}
-        stats['bn'] = bnstats(widths[0])
     else:
         raise ValueError('dataset not understood')
 
-    flat_params = flatten_params(params)
-    flat_stats = flatten_stats(stats)
+    flat_params = flatten(params)
+
+    set_requires_grad_except_bn_(flat_params)
 
     for k, v in list(flat_params.items()):
         if k.find('.conv') > -1:
-            flat_stats[size2name(v.size())] = cast(dirac(v.data.clone()))
+            flat_params[size2name(v.size())] = cast(dirac_(v.data.clone()))
 
-    return f, flat_params, flat_stats
+    return f, flat_params
 
 
 model_urls = {
@@ -190,8 +181,8 @@ model_urls = {
 class DiracNet(nn.Module):
 
     widths = (64, 128, 256, 512)
-    block_depths = {18: torch.IntTensor((2, 2, 2, 2)) * 2,
-                    34: torch.IntTensor((3, 4, 6, 3)) * 2}
+    block_depths = {18: [v * 2 for v in (2, 2, 2, 2)],
+                    34: [v * 2 for v in (3, 4, 6, 3)]}
 
     def __init__(self, depth=18):
         super().__init__()

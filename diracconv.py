@@ -1,13 +1,12 @@
 import torch
 from torch import nn
-from torch.autograd import Variable
 import torch.nn.functional as F
-from torch.nn.init import dirac
+from torch.nn.init import dirac_
 
 
 def normalize(w):
     """Normalizes weight tensor over full filter."""
-    return F.normalize(w.view(w.size(0), -1)).view_as(w)
+    return F.normalize(w.view(w.shape[0], -1)).view_as(w)
 
 
 class DiracConv(nn.Module):
@@ -15,12 +14,12 @@ class DiracConv(nn.Module):
     def init_params(self, out_channels):
         self.alpha = nn.Parameter(torch.Tensor(out_channels).fill_(1))
         self.beta = nn.Parameter(torch.Tensor(out_channels).fill_(0.1))
-        self.register_buffer('delta', dirac(self.weight.data.clone()))
-        assert self.delta.size() == self.weight.size()
+        self.register_buffer('delta', dirac_(self.weight.data.clone()))
+        assert self.delta.shape == self.weight.shape
         self.v = (-1,) + (1,) * (self.weight.dim() - 1)
 
     def transform_weight(self):
-        return self.alpha.view(*self.v) * Variable(self.delta) + self.beta.view(*self.v) * normalize(self.weight)
+        return self.alpha.view(*self.v) * self.delta + self.beta.view(*self.v) * normalize(self.weight)
 
 
 class DiracConv1d(nn.Conv1d, DiracConv):
